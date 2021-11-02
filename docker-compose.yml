@@ -1,0 +1,101 @@
+version: '3.8'
+
+services:
+  influxdb:
+    image: influxdb:1.8
+    container_name: influxdb
+    ports:
+      - "8083:8083"
+      - "8086:8086"
+      - "8090:8090"
+      - "2003:2003"
+    env_file:
+      - 'env.influxdb'
+    volumes:
+      - ./data:/var/lib/influxdb
+  
+  telegraf:
+    image: telegraf:latest
+    container_name: telegraf
+    links:
+      - influxdb
+      - nginx
+      - mongo
+      - elasticsearch
+    volumes:
+      - ./telegraf.conf:/etc/telegraf/telegraf.conf:ro
+  
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    env_file:
+      - 'env.grafana'
+    user: "0"
+    links:
+      - influxdb
+    volumes:
+      - ./data:/var/lib/grafana
+
+  web:
+    build:
+      context: ./services/web
+      dockerfile: Dockerfile
+    container_name: web
+    command: gunicorn --bind 0.0.0.0:5000 manage:app
+    volumes:
+      - ./data/nginx/static:/home/app/web/project/static
+      - ./data/nginx/media:/home/app/web/project/media
+    expose:
+      - 5000
+    env_file:
+      - ./env.web
+    depends_on:
+      - mongo
+      - elasticsearch
+      
+  nginx:
+    build: ./services/nginx
+    container_name: nginx
+    volumes:
+      - ./data/nginx/static:/home/app/web/project/static
+      - ./data/nginx/media:/home/app/web/project/media
+    ports:
+      - 1337:80
+    depends_on:
+      - web
+
+  mongo:
+    image: mongo:latest
+    container_name: mongo
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=example
+    volumes:
+      - ./data/mongo:/data/db
+      - ./data/mongo_config:/data/configdb
+
+  elasticsearch:
+    image: elasticsearch:7.9.1
+    container_name: elasticsearch
+    volumes:
+      - ./data/elasticsearch:/usr/share/elasticsearch/data
+    environment:
+      - cluster.name=laradock-cluster
+      - node.name=laradock-node
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - cluster.initial_master_nodes=laradock-node
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "9200:9200"
+      - "9300:9300"
